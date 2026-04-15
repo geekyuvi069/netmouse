@@ -60,5 +60,6 @@ We use Docker on Linux to bypass Wayland's strict security blocks.
    netmouse
    ```
 2. It will ask you for your Windows IP. Type it in and press Enter.
-3. Press **F8** on your keyboard to instantly transfer your mouse and keyboard over to the Windows screen (your Linux mouse will lock so you don't click anything by accident).
-4. Press **F8** again to bring them back to Linux.
+3. It will ask: `Enable keyboard sharing? [Y/n]`. Type `Y` if you want to control the Windows keyboard, or `n` if you only want to share your mouse.
+4. Press **F8** on your keyboard to instantly transfer your hardware over to the Windows screen (your Linux cursor and keyboard will safely lock to prevent accidental local typing).
+5. Press **F8** again to instantly unlock your hardware and bring it back to Linux.
