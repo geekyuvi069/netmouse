@@ -24,8 +24,9 @@ except ImportError:
 PORT = 5050
 
 class LinuxSenderRaw:
-    def __init__(self, windows_ip):
+    def __init__(self, windows_ip, enable_keyboard=False):
         self.windows_ip = windows_ip
+        self.enable_keyboard = enable_keyboard
         self.sock = None
         self.connected = False
         self.sending = False
@@ -70,9 +71,12 @@ class LinuxSenderRaw:
         try:
             self.sock.sendall(msg.encode('utf-8'))
         except Exception:
-            print("⚠ Connection lost!")
+            print("\n⚠ Connection lost! Failsafe triggered: Unlocking all devices.")
             self.connected = False
             self.sending = False
+            for dev in self.mouse_devs + self.keyboard_devs:
+                try: dev.ungrab()
+                except Exception: pass
 
     def start(self):
         banner = """
@@ -128,17 +132,21 @@ class LinuxSenderRaw:
 
                         # Button / Key Clicks
                         elif event.type == ecodes.EV_KEY:
-                            # F8 Toggle
-                            if event.code == ecodes.KEY_F8 and event.value == 1:
+                            # F8 Toggle (Trigger on RELEASE '0' to prevent Linux TTY auto-repeat infinitely spamming the pressed key)
+                            if event.code == ecodes.KEY_F8 and event.value == 0:
                                 self.sending = not self.sending
                                 if self.sending:
                                     self.send("SW:activate\n")
                                     # \r\033[K clears the terminal line (hides the ^[[19~ garbage)
-                                    print("\r\033[K  🖱️  ON:   Controlling Windows (Linux mouse locked)")
+                                    print("\r\033[K  🖱️  ON:   Controlling Windows (Linux hardware locked)")
                                     # Lock the mouse so Linux doesn't move or click
                                     for m_dev in self.mouse_devs:
                                         try: m_dev.grab()
                                         except Exception as e: print(f"Grab error: {e}")
+                                    if self.enable_keyboard:
+                                        for k_dev in self.keyboard_devs:
+                                            try: k_dev.grab()
+                                            except Exception: pass
                                 else:
                                     self.send("SW:deactivate\n")
                                     print("\r\033[K  ◼  OFF:  Back to Linux")
@@ -146,6 +154,10 @@ class LinuxSenderRaw:
                                     for m_dev in self.mouse_devs:
                                         try: m_dev.ungrab()
                                         except Exception: pass
+                                    if self.enable_keyboard:
+                                        for k_dev in self.keyboard_devs:
+                                            try: k_dev.ungrab()
+                                            except Exception: pass
                             
                             # Mouse buttons
                             elif self.sending:
@@ -155,6 +167,12 @@ class LinuxSenderRaw:
                                     self.send(f"C:r:{'p' if event.value else 'r'}\n")
                                 elif event.code == ecodes.BTN_MIDDLE:
                                     self.send(f"C:m:{'p' if event.value else 'r'}\n")
+                                elif self.enable_keyboard and event.code != ecodes.KEY_F8:
+                                    if event.value in [0, 1]:  # 0=release, 1=press
+                                        key_name = ecodes.KEY[event.code]
+                                        if isinstance(key_name, list):
+                                            key_name = key_name[0]
+                                        self.send(f"K:{key_name}:{event.value}\n")
 
                 # Send accumulated mouse deltas (rate limited by the select loop)
                 if self.sending and (dx != 0 or dy != 0):
@@ -184,7 +202,10 @@ if __name__ == '__main__':
         if not args.ip:
             print("ERROR: IP address is required.")
             sys.exit(1)
+            
+    kb_ans = input("Enable keyboard sharing? [Y/n]: ").strip().lower()
+    enable_kb = False if kb_ans == 'n' else True
 
-    sender = LinuxSenderRaw(args.ip)
+    sender = LinuxSenderRaw(args.ip, enable_keyboard=enable_kb)
     sender.sensitivity = args.speed
     sender.start()
