@@ -84,3 +84,13 @@ We use Docker on Linux to bypass Wayland's strict security blocks.
 3. It will ask: `Enable keyboard sharing? [Y/n]`. Type `Y` if you want to control the Windows keyboard, or `n` if you only want to share your mouse.
 4. Press **F8** on your keyboard to instantly transfer your hardware over to the Windows screen (your Linux cursor and keyboard will safely lock to prevent accidental local typing).
 5. Press **F8** again to instantly unlock your hardware and bring it back to Linux.
+
+---
+
+## 🚀 Roadmap / Future Plans
+- [ ] **macOS Support**: Port the receiver to macOS using `pynput` and Accessibility permissions.
+- [ ] **Linux Receiver**: Implement a `uinput` based receiver for Wayland-to-Wayland control.
+- [ ] **Encryption (TLS)**: Secure the TCP stream with SSL/TLS to prevent local network sniffing.
+- [ ] **Authentication**: Add a "Secret Key" pairing system to prevent unauthorized connections on public WiFi.
+- [ ] **Clipboard Sharing**: Sync text and images between systems automatically.
+- [ ] **Edge-Jumping**: Auto-switch systems when the mouse hits the monitor edge.
