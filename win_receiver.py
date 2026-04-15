@@ -22,6 +22,7 @@ BUFFER_SIZE = 4096
 
 try:
     from pynput.mouse import Controller as MouseController, Button
+    from pynput.keyboard import Controller as KeyboardController, Key
 except ImportError:
     print("ERROR: pynput not installed.")
     print("Run:  pip install pynput")
@@ -29,6 +30,43 @@ except ImportError:
 
 
 mouse = MouseController()
+keyboard = KeyboardController()
+
+LINUX_KEY_MAP = {
+    'KEY_SPACE': Key.space,
+    'KEY_ENTER': Key.enter,
+    'KEY_BACKSPACE': Key.backspace,
+    'KEY_TAB': Key.tab,
+    'KEY_ESC': Key.esc,
+    'KEY_LEFTSHIFT': Key.shift,
+    'KEY_RIGHTSHIFT': Key.shift_r,
+    'KEY_LEFTCTRL': Key.ctrl,
+    'KEY_RIGHTCTRL': Key.ctrl_r,
+    'KEY_LEFTALT': Key.alt,
+    'KEY_RIGHTALT': Key.alt_gr,
+    'KEY_CAPSLOCK': Key.caps_lock,
+    'KEY_UP': Key.up,
+    'KEY_DOWN': Key.down,
+    'KEY_LEFT': Key.left,
+    'KEY_RIGHT': Key.right,
+    'KEY_F1': Key.f1, 'KEY_F2': Key.f2, 'KEY_F3': Key.f3, 'KEY_F4': Key.f4,
+    'KEY_F5': Key.f5, 'KEY_F6': Key.f6, 'KEY_F7': Key.f7, 'KEY_F8': Key.f8,
+    'KEY_F9': Key.f9, 'KEY_F10': Key.f10, 'KEY_F11': Key.f11, 'KEY_F12': Key.f12,
+}
+
+SYMBOL_MAP = {
+    'KEY_MINUS': '-', 'KEY_EQUAL': '=', 'KEY_LEFTBRACE': '[', 'KEY_RIGHTBRACE': ']',
+    'KEY_BACKSLASH': '\\', 'KEY_SEMICOLON': ';', 'KEY_APOSTROPHE': "'",
+    'KEY_GRAVE': '`', 'KEY_COMMA': ',', 'KEY_DOT': '.', 'KEY_SLASH': '/'
+}
+
+def map_key(linux_key):
+    if linux_key in LINUX_KEY_MAP: return LINUX_KEY_MAP[linux_key]
+    if linux_key in SYMBOL_MAP: return SYMBOL_MAP[linux_key]
+    # Standard letters/numbers (e.g. KEY_A -> a)
+    base = linux_key.replace('KEY_', '').lower()
+    if len(base) == 1: return base
+    return None
 
 
 def process_message(raw):
@@ -67,9 +105,18 @@ def process_message(raw):
         # Switch notification
         elif msg_type == 'SW' and len(parts) >= 2:
             if parts[1] == 'activate':
-                print("  ⬅ Linux is controlling this cursor")
+                print("  ⬅ Linux is controlling this sys")
             elif parts[1] == 'deactivate':
                 print("  ⬅ Linux released control")
+                
+        # Keyboard press
+        elif msg_type == 'K' and len(parts) >= 3:
+            target = map_key(parts[1])
+            if target:
+                if parts[2] == '1':
+                    keyboard.press(target)
+                elif parts[2] == '0':
+                    keyboard.release(target)
 
     except (ValueError, IndexError):
         pass  # Ignore corrupted packets
