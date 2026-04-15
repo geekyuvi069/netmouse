@@ -37,6 +37,27 @@ Copy `win_receiver.py` to your Windows PC.
    ```
 *(Take note of the IP address it prints out!)*
 
+> [!IMPORTANT]
+> **Run as Administrator:** On Windows, you MUST run your Command Prompt or PowerShell as **Administrator**. If you don't, Windows security will block the mouse from moving over the Taskbar, the Start Menu, or the Task Manager.
+
+### 🚀 Pro Tip: Windows "Easy Run" Shortcut
+To run the receiver from any terminal by just typing `netmouse`, do this:
+
+1. Create a folder `C:\Tools`.
+2. Create a file `C:\Tools\netmouse.cmd` and paste this (fix the paths to match your desktop):
+   ```batch
+   @echo off
+   cd /d C:\Users\YOUR_NAME\Desktop\live_mouse
+   pip install pynput
+   python win_receiver.py
+   pause
+   ```
+3. Add it to your System Path (run once in Admin CMD):
+   ```cmd
+   setx PATH "%PATH%;C:\Tools"
+   ```
+4. Now you can just type `netmouse` in any Windows CMD/PowerShell to start!
+
 ---
 
 ## 2. Linux Setup (The Sender)
