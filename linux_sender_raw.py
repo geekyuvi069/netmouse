@@ -61,6 +61,9 @@ class LinuxSenderRaw:
             try:
                 self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 self.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+                # Enable TCP Keep-Alive to prevent silent disconnections
+                self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+                
                 print(f"⏳ Connecting to Windows ({self.windows_ip}:{PORT})...")
                 self.sock.connect((self.windows_ip, PORT))
                 self.connected = True
@@ -81,6 +84,7 @@ class LinuxSenderRaw:
         if not self.connected: return
         try:
             self.sock.sendall(msg.encode('utf-8'))
+            self.last_send_time = time.time()
         except Exception:
             print("\n⚠ Connection lost! Failsafe triggered: Unlocking all devices.")
             self.connected = False
@@ -117,6 +121,7 @@ class LinuxSenderRaw:
         fd_to_dev = {dev.fd: dev for dev in all_devs}
         
         dx, dy = 0, 0
+        self.last_send_time = time.time()
         
         # Initial FD sync
         all_monitored_fds = list(fd_to_dev.keys())
@@ -129,6 +134,11 @@ class LinuxSenderRaw:
                     # Re-sync fd list if connection was lost/re-established
                     all_monitored_fds = list(fd_to_dev.keys())
                     if self.sock: all_monitored_fds.append(self.sock.fileno())
+                    self.last_send_time = time.time()
+
+                # Heartbeat: Send a ping if idle for 10 seconds to keep connection alive
+                if self.connected and time.time() - self.last_send_time > 10:
+                    self.send("P:\n")
 
                 r, w, x = select.select(all_monitored_fds, [], [], 0.01)
                 
@@ -181,6 +191,12 @@ class LinuxSenderRaw:
                         elif event.type == ecodes.EV_KEY:
                             # F8 Toggle (Trigger on RELEASE '0' to prevent Linux TTY auto-repeat infinitely spamming the pressed key)
                             if event.code == ecodes.KEY_F8 and event.value == 0:
+                                # Proactive check: If connection is dead, reconnect immediately
+                                if not self.connected:
+                                    self.connect()
+                                    all_monitored_fds = list(fd_to_dev.keys())
+                                    if self.sock: all_monitored_fds.append(self.sock.fileno())
+
                                 self.sending = not self.sending
                                 if self.sending:
                                     self.send("SW:activate\n")
