@@ -40,6 +40,11 @@ class LinuxSenderRaw:
     def _find_devices(self):
         devices = [evdev.InputDevice(path) for path in evdev.list_devices()]
         for dev in devices:
+            # Filter out devices that are obviously audio equipment (headphones/earphones)
+            name = dev.name.lower()
+            if any(word in name for word in ["audio", "headset", "headphones", "speakers"]):
+                continue
+
             caps = dev.capabilities()
             if ecodes.EV_REL in caps and ecodes.REL_X in caps[ecodes.EV_REL]:
                 self.mouse_devs.append(dev)
@@ -66,6 +71,12 @@ class LinuxSenderRaw:
                 time.sleep(3)
         return False
 
+    def send_failsafe_ungrab(self):
+        self.sending = False
+        for dev in self.mouse_devs + self.keyboard_devs:
+            try: dev.ungrab()
+            except Exception: pass
+
     def send(self, msg):
         if not self.connected: return
         try:
@@ -73,10 +84,7 @@ class LinuxSenderRaw:
         except Exception:
             print("\n⚠ Connection lost! Failsafe triggered: Unlocking all devices.")
             self.connected = False
-            self.sending = False
-            for dev in self.mouse_devs + self.keyboard_devs:
-                try: dev.ungrab()
-                except Exception: pass
+            self.send_failsafe_ungrab()
 
     def start(self):
         banner = """
@@ -114,12 +122,47 @@ class LinuxSenderRaw:
             while self.running:
                 if not self.connected:
                     self.connect()
-                    
-                r, w, x = select.select(fd_to_dev.keys(), [], [], 0.01)
+                    # Re-sync fd list if connection was lost/re-established
+                    all_monitored_fds = list(fd_to_dev.keys())
+                    if self.sock: all_monitored_fds.append(self.sock.fileno())
+
+                r, w, x = select.select(all_monitored_fds, [], [], 0.01)
                 
                 for fd in r:
-                    dev = fd_to_dev[fd]
-                    for event in dev.read():
+                    if self.sock and fd == self.sock.fileno():
+                        try:
+                            data = self.sock.recv(1024).decode('utf-8')
+                            if not data:
+                                print("\n⚠ Connection closed by Windows.")
+                                self.connected = False
+                                self.send_failsafe_ungrab()
+                                break
+                            if "SW:release" in data:
+                                if self.sending:
+                                    self.sending = False
+                                    print("\r\033[K  ◼  OFF:  Back to Linux (Edge Jump)")
+                                    self.send_failsafe_ungrab()
+                        except Exception:
+                            self.connected = False
+                            self.send_failsafe_ungrab()
+                        continue
+
+                    dev = fd_to_dev.get(fd)
+                    if not dev: continue
+                    
+                    try:
+                        events = dev.read()
+                    except (OSError, IOError) as e:
+                        if e.errno == 19: # No such device (unplugged)
+                            print(f"\r\033[K⚠ Device disconnected: {dev.name}")
+                            del fd_to_dev[fd]
+                            # Update select list
+                            all_monitored_fds = list(fd_to_dev.keys())
+                            if self.sock: all_monitored_fds.append(self.sock.fileno())
+                            continue
+                        raise e
+
+                    for event in events:
                         # Mouse Movement
                         if event.type == ecodes.EV_REL:
                             if event.code == ecodes.REL_X:
