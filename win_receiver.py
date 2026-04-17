@@ -72,7 +72,7 @@ def map_key(linux_key):
     return None
 
 
-def process_message(raw):
+def process_message(raw, conn=None):
     """Parse and execute a single command."""
     raw = raw.strip()
     if not raw:
@@ -86,6 +86,14 @@ def process_message(raw):
         if msg_type == 'M' and len(parts) >= 3:
             dx, dy = int(parts[1]), int(parts[2])
             mouse.move(dx, dy)
+            
+            # Edge-Return logic: if mouse hits Left Edge (x=0), jump back to Linux
+            if mouse.position[0] <= 0 and conn:
+                try:
+                    conn.sendall(b"SW:release\n")
+                    print("  ⬅ Edge Jump: Returning control to Linux")
+                except Exception:
+                    pass
 
         # Click
         elif msg_type == 'C' and len(parts) >= 3:
@@ -144,7 +152,7 @@ def handle_client(conn, addr):
             # Process complete messages (newline-delimited)
             while '\n' in recv_buffer:
                 line, recv_buffer = recv_buffer.split('\n', 1)
-                response = process_message(line)
+                response = process_message(line, conn=conn)
                 if response:
                     try:
                         conn.sendall(response.encode('utf-8'))
