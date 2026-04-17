@@ -118,6 +118,10 @@ class LinuxSenderRaw:
         
         dx, dy = 0, 0
         
+        # Initial FD sync
+        all_monitored_fds = list(fd_to_dev.keys())
+        if self.sock: all_monitored_fds.append(self.sock.fileno())
+
         try:
             while self.running:
                 if not self.connected:
