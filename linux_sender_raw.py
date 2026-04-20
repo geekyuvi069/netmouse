@@ -56,7 +56,7 @@ class LinuxSenderRaw:
         if not self.mouse_devs:
             print("⚠ Warning: No mice found in /dev/input! Are you running with sudo?")
 
-    def connect(self):
+    def connect(self, retry_sleep=3):
         while self.running:
             try:
                 self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -70,8 +70,11 @@ class LinuxSenderRaw:
                 print(f"✓ Connected! Press F8 to toggle control ON/OFF.\n")
                 return True
             except Exception as e:
-                print(f"✗ Connection failed: {e}. Retrying in 3s...")
-                time.sleep(3)
+                # If we are in a hurry (retry_sleep=0), don't wait for the loop, just return fail
+                if retry_sleep == 0:
+                    return False
+                print(f"✗ Connection failed: {e}. Retrying in {retry_sleep}s...")
+                time.sleep(retry_sleep)
         return False
 
     def send_failsafe_ungrab(self):
@@ -81,14 +84,16 @@ class LinuxSenderRaw:
             except Exception: pass
 
     def send(self, msg):
-        if not self.connected: return
+        if not self.connected: return False
         try:
             self.sock.sendall(msg.encode('utf-8'))
             self.last_send_time = time.time()
+            return True
         except Exception:
             print("\n⚠ Connection lost! Failsafe triggered: Unlocking all devices.")
             self.connected = False
             self.send_failsafe_ungrab()
+            return False
 
     def start(self):
         banner = """
@@ -191,25 +196,36 @@ class LinuxSenderRaw:
                         elif event.type == ecodes.EV_KEY:
                             # F8 Toggle (Trigger on RELEASE '0' to prevent Linux TTY auto-repeat infinitely spamming the pressed key)
                             if event.code == ecodes.KEY_F8 and event.value == 0:
-                                # Proactive check: If connection is dead, reconnect immediately
+                                # Proactive check: If connection is dead, try to recover instantly
                                 if not self.connected:
-                                    self.connect()
+                                    self.connect(retry_sleep=0) 
                                     all_monitored_fds = list(fd_to_dev.keys())
                                     if self.sock: all_monitored_fds.append(self.sock.fileno())
 
                                 self.sending = not self.sending
                                 if self.sending:
-                                    self.send("SW:activate\n")
-                                    # \r\033[K clears the terminal line (hides the ^[[19~ garbage)
-                                    print("\r\033[K  🖱️  ON:   Controlling Windows (Linux hardware locked)")
-                                    # Lock the mouse so Linux doesn't move or click
-                                    for m_dev in self.mouse_devs:
-                                        try: m_dev.grab()
-                                        except Exception as e: print(f"Grab error: {e}")
-                                    if self.enable_keyboard:
-                                        for k_dev in self.keyboard_devs:
-                                            try: k_dev.grab()
-                                            except Exception: pass
+                                    # If sending the activation fails, try one instant reconnect and retry
+                                    if not self.send("SW:activate\n"):
+                                        print("⚡ First attempt failed. Attempting instant recovery...")
+                                        if self.connect(retry_sleep=0):
+                                            all_monitored_fds = list(fd_to_dev.keys())
+                                            if self.sock: all_monitored_fds.append(self.sock.fileno())
+                                            if self.send("SW:activate\n"):
+                                                self.sending = True  # Success!
+
+                                    if self.sending:
+                                        # \r\033[K clears the terminal line (hides the ^[[19~ garbage)
+                                        print("\r\033[K  🖱️  ON:   Controlling Windows (Linux hardware locked)")
+                                        # Lock the mouse so Linux doesn't move or click
+                                        for m_dev in self.mouse_devs:
+                                            try: m_dev.grab()
+                                            except Exception as e: print(f"Grab error: {e}")
+                                        if self.enable_keyboard:
+                                            for k_dev in self.keyboard_devs:
+                                                try: k_dev.grab()
+                                                except Exception: pass
+                                    else:
+                                        print("\r\033[K  ✗ Failed to connect. Please check Windows receiver.")
                                 else:
                                     self.send("SW:deactivate\n")
                                     print("\r\033[K  ◼  OFF:  Back to Linux")
