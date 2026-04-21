@@ -153,6 +153,7 @@ class LinuxSenderRaw:
         
         dx, dy = 0, 0
         self.last_send_time = time.time()
+        self.last_recv_time = time.time()
         
         # Initial FD sync
         all_monitored_fds = list(fd_to_dev.keys())
@@ -166,6 +167,7 @@ class LinuxSenderRaw:
                     all_monitored_fds = list(fd_to_dev.keys())
                     if self.sock: all_monitored_fds.append(self.sock.fileno())
                     self.last_send_time = time.time()
+                    self.last_recv_time = time.time()
 
                 # Heartbeat: Send a ping if idle for 10 seconds to keep connection alive
                 if self.connected and time.time() - self.last_send_time > 10:
@@ -177,6 +179,8 @@ class LinuxSenderRaw:
                     if self.sock and fd == self.sock.fileno():
                         try:
                             data = self.sock.recv(1024).decode('utf-8')
+                            if data:
+                                self.last_recv_time = time.time()
                             if not data:
                                 print("\n⚠ Connection closed by Windows.")
                                 self.connected = False
@@ -211,11 +215,23 @@ class LinuxSenderRaw:
                             elif event.type == ecodes.EV_KEY:
                                 # F8 Toggle (Trigger on RELEASE '0' to prevent Linux TTY auto-repeat infinitely spamming the pressed key)
                                 if event.code == ecodes.KEY_F8 and event.value == 0:
-                                    # Proactive check: If connection is dead, try to recover instantly
-                                    if not self.connected:
-                                        self.connect(retry_sleep=0) 
+                                    # Proactive check: If connection is dead or stale (no pong received
+                                    # recently despite heartbeats), force reconnect before activating.
+                                    connection_stale = (
+                                        self.connected and
+                                        time.time() - self.last_recv_time > 15
+                                    )
+                                    if not self.connected or connection_stale:
+                                        if connection_stale:
+                                            print("\r\033[K⚡ Stale connection detected, reconnecting...")
+                                            self.connected = False
+                                            if self.sock:
+                                                try: self.sock.close()
+                                                except Exception: pass
+                                        self.connect(retry_sleep=0)
                                         all_monitored_fds = list(fd_to_dev.keys())
                                         if self.sock: all_monitored_fds.append(self.sock.fileno())
+                                        self.last_recv_time = time.time()
 
                                     self.sending = not self.sending
                                     if self.sending:
