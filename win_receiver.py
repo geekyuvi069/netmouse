@@ -1,31 +1,43 @@
 """
-NetMouse Lite - Windows Receiver (Standalone)
+NetMouse Lite - Receiver (Mac & Windows)
 
-Drop this ONE file on your Windows machine and run it.
-It receives mouse commands from your Linux machine and moves the Windows cursor.
+Drop this ONE file on your Mac or Windows machine and run it.
+It receives mouse/keyboard commands from Linux and controls this machine.
 
 Usage:
-  python win_receiver.py
+  python3 win_receiver.py     (Mac)
+  python  win_receiver.py     (Windows)
 
-That's it. No other files needed on Windows.
+That's it. No other files needed.
 """
 
 import socket
 import threading
 import time
 import sys
+import platform
 
 # ─── CONFIG (edit these) ────────────────────────────────────────
-PORT = 5050              # Must match Linux side
+PORT = 5050
 BUFFER_SIZE = 4096
 # ────────────────────────────────────────────────────────────────
+
+print("Are you on Mac or Windows?")
+print("  1. Mac")
+print("  2. Windows")
+_choice = input("Enter 1 or 2: ").strip()
+OS = "Darwin" if _choice == "1" else "Windows"
 
 try:
     from pynput.mouse import Controller as MouseController, Button
     from pynput.keyboard import Controller as KeyboardController, Key
 except ImportError:
     print("ERROR: pynput not installed.")
-    print("Run:  pip install pynput")
+    if OS == "Darwin":
+        print("Run:  pip3 install pynput")
+    else:
+        print("Run:  pip install pynput")
+    input("\nPress Enter to exit...")
     sys.exit(1)
 
 
@@ -66,17 +78,41 @@ SYMBOL_MAP = {
 def map_key(linux_key):
     if linux_key in LINUX_KEY_MAP: return LINUX_KEY_MAP[linux_key]
     if linux_key in SYMBOL_MAP: return SYMBOL_MAP[linux_key]
-    # Standard letters/numbers (e.g. KEY_A -> a)
     base = linux_key.replace('KEY_', '').lower()
     if len(base) == 1: return base
     return None
+
+
+def get_local_ip():
+    """Reliably get the local LAN IP on Mac and Windows."""
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return socket.gethostbyname(socket.gethostname())
+
+
+def check_mac_accessibility():
+    """On Mac, pynput needs Accessibility access. Test it early and warn clearly."""
+    try:
+        _ = mouse.position
+    except Exception:
+        print("\n  !! Accessibility permission required !!")
+        print("  Go to: System Settings -> Privacy & Security -> Accessibility")
+        print("  Add Terminal (or your Python app) and enable it.")
+        print("  Then restart this script.\n")
+        input("Press Enter to exit...")
+        sys.exit(1)
 
 
 def process_message(raw, conn=None):
     """Parse and execute a single command."""
     raw = raw.strip()
     if not raw:
-        return
+        return None
 
     parts = raw.split(':')
     msg_type = parts[0]
@@ -86,12 +122,12 @@ def process_message(raw, conn=None):
         if msg_type == 'M' and len(parts) >= 3:
             dx, dy = int(parts[1]), int(parts[2])
             mouse.move(dx, dy)
-            
-            # Edge-Return logic: if mouse hits Left Edge (x=0), jump back to Linux
+
+            # Edge-Return: mouse hits Left Edge (x<=0) -> jump back to Linux
             if mouse.position[0] <= 0 and conn:
                 try:
                     conn.sendall(b"SW:release\n")
-                    print("  ⬅ Edge Jump: Returning control to Linux")
+                    print("  <- Edge Jump: Returning control to Linux")
                 except Exception:
                     pass
 
@@ -109,18 +145,18 @@ def process_message(raw, conn=None):
             dx, dy = int(parts[1]), int(parts[2])
             mouse.scroll(dx, dy)
 
-        # Ping → respond with Pong
+        # Ping -> respond with Pong
         elif msg_type == 'P':
             return "PO:\n"
 
         # Switch notification
         elif msg_type == 'SW' and len(parts) >= 2:
             if parts[1] == 'activate':
-                print("  ⬅ Linux is controlling this sys")
+                print("  <- Linux is now controlling this machine")
             elif parts[1] == 'deactivate':
-                print("  ⬅ Linux released control")
-                
-        # Keyboard press
+                print("  <- Linux released control")
+
+        # Keyboard press/release
         elif msg_type == 'K' and len(parts) >= 3:
             target = map_key(parts[1])
             if target:
@@ -129,27 +165,26 @@ def process_message(raw, conn=None):
                 elif parts[2] == '0':
                     keyboard.release(target)
 
-    except (ValueError, IndexError):
-        pass  # Ignore corrupted packets
+    except Exception:
+        pass
 
     return None
 
 
 def handle_client(conn, addr):
-    """Handle one connection from Linux."""
-    print(f"✓ Linux connected: {addr[0]}")
+    """Handle one Linux connection."""
+    print(f"\n  + Linux connected: {addr[0]}")
     recv_buffer = ""
 
     while True:
         try:
             data = conn.recv(BUFFER_SIZE)
             if not data:
-                print("✗ Linux disconnected.")
+                print("  - Linux disconnected.")
                 break
 
             recv_buffer += data.decode('utf-8', errors='ignore')
 
-            # Process complete messages (newline-delimited)
             while '\n' in recv_buffer:
                 line, recv_buffer = recv_buffer.split('\n', 1)
                 response = process_message(line, conn=conn)
@@ -160,46 +195,52 @@ def handle_client(conn, addr):
                         pass
 
         except ConnectionResetError:
-            print("✗ Connection reset.")
+            print("  - Connection reset.")
             break
         except Exception as e:
-            print(f"⚠ Error: {e}")
+            print(f"  ! Error: {e}")
             break
 
     conn.close()
 
 
 def main():
-    print("╔══════════════════════════════════════════╗")
-    print("║   NetMouse Lite - Windows Receiver       ║")
-    print("║   Waiting for Linux to connect...        ║")
-    print("╚══════════════════════════════════════════╝")
+    if OS == "Darwin":
+        check_mac_accessibility()
+        firewall_note = (
+            "  Firewall: System Settings -> Network -> Firewall\n"
+            "            Make sure it allows incoming connections on port " + str(PORT)
+        )
+    else:
+        firewall_note = "  Firewall: If prompted by Windows Defender, click 'Allow access'"
+
+    local_ip = get_local_ip()
+
+    print("\n" + "=" * 46)
+    print(f"   NetMouse Lite - {'Mac' if OS == 'Darwin' else 'Windows'} Receiver")
+    print("   Waiting for Linux to connect...")
+    print("=" * 46)
+    print(f"\n  Your IP address:  {local_ip}")
+    print(f"  Port:             {PORT}")
+    print(f"\n{firewall_note}")
+    print(f"\n  On Linux, run:")
+    print(f"  netmouse --ip {local_ip}\n")
 
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     server.bind(('0.0.0.0', PORT))
     server.listen(1)
 
-    # Show local IPs for easy setup
-    hostname = socket.gethostname()
-    try:
-        local_ip = socket.gethostbyname(hostname)
-        print(f"\n  Windows IP: {local_ip}")
-    except Exception:
-        print(f"\n  Hostname: {hostname}")
-    print(f"  Port: {PORT}")
-    print(f"\n  On Linux, open terminal and run:")
-    print(f"  netmouse\n")
+    print("  Listening... (Ctrl+C to quit)\n")
 
     while True:
         try:
             conn, addr = server.accept()
             conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-            # Handle in thread so server keeps listening after disconnect
             t = threading.Thread(target=handle_client, args=(conn, addr), daemon=True)
             t.start()
         except KeyboardInterrupt:
-            print("\nShutting down.")
+            print("\n  Shutting down.")
             break
 
     server.close()
