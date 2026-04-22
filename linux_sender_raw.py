@@ -173,24 +173,21 @@ class LinuxSenderRaw:
                 if self.connected and time.time() - self.last_send_time > 10:
                     self.send("P:\n")
 
-                r, w, x = select.select(all_monitored_fds, [], [], 0.01)
+                # Use a small timeout (1ms) for high-frequency responsiveness
+                r, w, x = select.select(all_monitored_fds, [], [], 0.001)
                 
                 for fd in r:
+                    # Handle incoming data from receiver (pong, disconnect)
                     if self.sock and fd == self.sock.fileno():
                         try:
                             data = self.sock.recv(1024).decode('utf-8')
                             if data:
                                 self.last_recv_time = time.time()
                             if not data:
-                                print("\n⚠ Connection closed by Windows.")
+                                print("\n⚠ Connection closed by receiver.")
                                 self.connected = False
                                 self.send_failsafe_ungrab()
                                 break
-                            if "SW:release" in data:
-                                if self.sending:
-                                    self.sending = False
-                                    print("\r\033[K  ◼  OFF:  Back to Linux (Edge Jump)")
-                                    self.send_failsafe_ungrab()
                         except Exception:
                             self.connected = False
                             self.send_failsafe_ungrab()
@@ -246,17 +243,31 @@ class LinuxSenderRaw:
 
                                         if self.sending:
                                             # \r\033[K clears the terminal line (hides the ^[[19~ garbage)
-                                            print("\r\033[K  🖱️  ON:   Controlling Windows (Linux hardware locked)")
+                                            print("\r\033[K  🖱️  ON:   Controlling Machine (Hardware locked)")
+                                            
+                                            grab_success = True
                                             # Lock the mouse so Linux doesn't move or click
                                             for m_dev in self.mouse_devs:
-                                                try: m_dev.grab()
-                                                except Exception as e: print(f"Grab error: {e}")
-                                            if self.enable_keyboard:
+                                                try:
+                                                    m_dev.grab()
+                                                except Exception as e:
+                                                    print(f"\r\033[K⚠ Grab error: {e}")
+                                                    if "[Errno 16]" in str(e):
+                                                        print("\r\033[K  (A ghost process might be running. Run: sudo pkill -f linux_sender_raw.py)")
+                                                    grab_success = False
+                                            
+                                            if self.enable_keyboard and grab_success:
                                                 for k_dev in self.keyboard_devs:
                                                     try: k_dev.grab()
                                                     except Exception: pass
+                                            
+                                            if not grab_success:
+                                                print("\r\033[K  ✗ Failed to lock devices. Reverting to local control.")
+                                                self.sending = False
+                                                self.send_failsafe_ungrab()
+                                                self.send("SW:deactivate\n")
                                         else:
-                                            print("\r\033[K  ✗ Failed to connect. Please check Windows receiver.")
+                                            print("\r\033[K  ✗ Failed to connect. Please check receiver.")
                                     else:
                                         self.send("SW:deactivate\n")
                                         print("\r\033[K  ◼  OFF:  Back to Linux")

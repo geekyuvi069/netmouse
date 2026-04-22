@@ -1,12 +1,12 @@
 """
-NetMouse Lite - Receiver (Mac & Windows)
+NetMouse Lite - Universal Receiver (Mac & Windows)
 
 Drop this ONE file on your Mac or Windows machine and run it.
 It receives mouse/keyboard commands from Linux and controls this machine.
 
 Usage:
-  python3 win_receiver.py     (Mac)
-  python  win_receiver.py     (Windows)
+  python3 receiver.py          (Mac / Linux)
+  python  receiver.py          (Windows)
 
 That's it. No other files needed.
 """
@@ -22,27 +22,25 @@ PORT = 5050
 BUFFER_SIZE = 4096
 # ────────────────────────────────────────────────────────────────
 
-print("Are you on Mac or Windows?")
-print("  1. Mac")
-print("  2. Windows")
-_choice = input("Enter 1 or 2: ").strip()
-OS = "Darwin" if _choice == "1" else "Windows"
+# Auto-detect OS — no manual prompt needed
+OS = platform.system()   # "Darwin" for Mac, "Windows" for Windows
 
 try:
     from pynput.mouse import Controller as MouseController, Button
     from pynput.keyboard import Controller as KeyboardController, Key
 except ImportError:
     print("ERROR: pynput not installed.")
-    if OS == "Darwin":
-        print("Run:  pip3 install pynput")
-    else:
+    if OS == "Windows":
         print("Run:  pip install pynput")
+    else:
+        print("Run:  pip3 install pynput")
     input("\nPress Enter to exit...")
     sys.exit(1)
 
 
 mouse = MouseController()
 keyboard = KeyboardController()
+
 
 LINUX_KEY_MAP = {
     'KEY_SPACE': Key.space,
@@ -84,7 +82,7 @@ def map_key(linux_key):
 
 
 def get_local_ip():
-    """Reliably get the local LAN IP on Mac and Windows."""
+    """Reliably get the local LAN IP on Mac, Windows, and Linux."""
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.connect(("8.8.8.8", 80))
@@ -96,12 +94,17 @@ def get_local_ip():
 
 
 def check_mac_accessibility():
-    """On Mac, pynput needs Accessibility access. Test it early and warn clearly."""
+    """
+    On Mac, pynput needs Accessibility access to control the mouse/keyboard.
+    Try a harmless mouse.position read — if it fails, accessibility is blocked.
+    """
+    if OS != "Darwin":
+        return
     try:
         _ = mouse.position
     except Exception:
         print("\n  !! Accessibility permission required !!")
-        print("  Go to: System Settings -> Privacy & Security -> Accessibility")
+        print("  Go to: System Settings → Privacy & Security → Accessibility")
         print("  Add Terminal (or your Python app) and enable it.")
         print("  Then restart this script.\n")
         input("Press Enter to exit...")
@@ -122,14 +125,6 @@ def process_message(raw, conn=None):
         if msg_type == 'M' and len(parts) >= 3:
             dx, dy = int(parts[1]), int(parts[2])
             mouse.move(dx, dy)
-
-            # Edge-Return: mouse hits Left Edge (x<=0) -> jump back to Linux
-            if mouse.position[0] <= 0 and conn:
-                try:
-                    conn.sendall(b"SW:release\n")
-                    print("  <- Edge Jump: Returning control to Linux")
-                except Exception:
-                    pass
 
         # Click
         elif msg_type == 'C' and len(parts) >= 3:
@@ -205,24 +200,33 @@ def handle_client(conn, addr):
 
 
 def main():
+    check_mac_accessibility()
+
+    local_ip = get_local_ip()
+
     if OS == "Darwin":
-        check_mac_accessibility()
+        os_label = "Mac"
         firewall_note = (
             "  Firewall: System Settings -> Network -> Firewall\n"
             "            Make sure it allows incoming connections on port " + str(PORT)
         )
+    elif OS == "Windows":
+        os_label = "Windows"
+        firewall_note = (
+            "  Firewall: If prompted by Windows Defender, click 'Allow access'"
+        )
     else:
-        firewall_note = "  Firewall: If prompted by Windows Defender, click 'Allow access'"
+        os_label = OS
+        firewall_note = ""
 
-    local_ip = get_local_ip()
-
-    print("\n" + "=" * 46)
-    print(f"   NetMouse Lite - {'Mac' if OS == 'Darwin' else 'Windows'} Receiver")
+    print("=" * 46)
+    print(f"   NetMouse Lite - {os_label} Receiver")
     print("   Waiting for Linux to connect...")
     print("=" * 46)
     print(f"\n  Your IP address:  {local_ip}")
     print(f"  Port:             {PORT}")
-    print(f"\n{firewall_note}")
+    if firewall_note:
+        print(f"\n{firewall_note}")
     print(f"\n  On Linux, run:")
     print(f"  netmouse --ip {local_ip}\n")
 
